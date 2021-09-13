@@ -25,28 +25,18 @@ class CTC(torch.nn.Module):
         self.dropout_rate = dropout_rate
         self.ctc_lo = torch.nn.Linear(eprojs, odim)
 
-        reduction_type = "sum" if reduce else "none"
-        self.ctc_loss = torch.nn.CTCLoss(reduction=reduction_type)
-
-    def forward(self, hs_pad: torch.Tensor, hlens: torch.Tensor,
-                ys_pad: torch.Tensor, ys_lens: torch.Tensor) -> torch.Tensor:
-        """Calculate CTC loss.
+    def forward(self, hs_pad: torch.Tensor) -> torch.Tensor:
+        """Calculate CTC logits.
 
         Args:
             hs_pad: batch of padded hidden state sequences (B, Tmax, D)
-            hlens: batch of lengths of hidden state sequences (B)
-            ys_pad: batch of padded character id sequence tensor (B, Lmax)
-            ys_lens: batch of lengths of character sequence (B)
         """
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
         # ys_hat: (B, L, D) -> (L, B, D)
         ys_hat = ys_hat.transpose(0, 1)
         ys_hat = ys_hat.log_softmax(2)
-        loss = self.ctc_loss(ys_hat, ys_pad, hlens, ys_lens)
-        # Batch-size average
-        loss = loss / ys_hat.size(1)
-        return loss
+        return ys_hat
 
     def log_softmax(self, hs_pad: torch.Tensor) -> torch.Tensor:
         """log_softmax of frame activations

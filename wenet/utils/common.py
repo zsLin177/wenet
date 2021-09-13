@@ -84,6 +84,16 @@ def add_sos_eos(ys_pad: torch.Tensor, sos: int, eos: int,
     ys_out = [torch.cat([y, _eos], dim=0) for y in ys]
     return pad_list(ys_in, eos), pad_list(ys_out, ignore_id)
 
+def add_eos(ys_pad: torch.Tensor, eos: int,
+            ignore_id: int) -> torch.Tensor:
+    _eos = torch.tensor([eos],
+                        dtype=torch.long,
+                        requires_grad=False,
+                        device=ys_pad.device)
+    ys = [y[y != ignore_id] for y in ys_pad]  # parse padded ys
+    ys_out = [torch.cat([y, _eos], dim=0) for y in ys]
+    return pad_list(ys_out, ignore_id)
+
 
 def reverse_pad_list(ys_pad: torch.Tensor,
                      ys_lens: torch.Tensor,
