@@ -79,6 +79,12 @@ if __name__ == '__main__':
                         action='store_true',
                         default=False,
                         help='Use automatic mixed precision training')
+    parser.add_argument('--teacher',
+                        action='store_true',
+                        default=False,
+                        help='Use KD training')
+    parser.add_argument('--teacher_checkpoint', help='teacher checkpoint model')
+    parser.add_argument('--teacher_config', required=True, help='teacher config file')
     parser.add_argument('--cmvn', default=None, help='global cmvn file')
 
     args = parser.parse_args()
@@ -183,6 +189,19 @@ if __name__ == '__main__':
     cv_loss = infos.get('cv_loss', 0.0)
     step = infos.get('step', -1)
 
+    if args.teacher:
+        with open(args.teacher_config, 'r') as fin:
+            teacher_configs = yaml.load(fin, Loader=yaml.FullLoader)
+        assert (configs['input_dim'] == teacher_configs['input_dim'] and
+                configs['output_dim'] == teacher_configs['output_dim'] and
+                os.path.exists(teacher_configs['cmvn_file']))
+        teacher_configs["use_dynamic_chunk"] = False
+        teacher_model = init_asr_model(teacher_configs)
+        load_checkpoint(teacher_model, args.teacher_checkpoint)
+        teacher_model.eval()
+        for param in teacher_model.parameters():
+            param.requires_grad = False
+
     num_epochs = configs.get('max_epoch', 100)
     model_dir = args.model_dir
     writer = None
@@ -197,14 +216,21 @@ if __name__ == '__main__':
         model.cuda()
         model = torch.nn.parallel.DistributedDataParallel(
             model, find_unused_parameters=True)
+        if args.teacher:
+            teacher_model.cuda()
         device = torch.device("cuda")
     else:
         use_cuda = args.gpu >= 0 and torch.cuda.is_available()
         device = torch.device('cuda' if use_cuda else 'cpu')
         model = model.to(device)
+        if args.teacher:
+            teacher_model = teacher_model.to(device)
 
-    criterion = Loss(vocab_size=vocab_size, device=device, **configs['model_conf'])
-    executor = Executor(model, criterion, device, args.__dict__)
+    criterion = Loss(vocab_size=vocab_size, device=device, teacher=args.teacher, **configs['model_conf'])
+    if args.teacher:
+        executor = Executor([model, teacher_model], criterion, device, configs)
+    else:
+        executor = Executor([model], criterion, device, configs)
 
     optimizer = optim.Adam(model.parameters(), **configs['optim_conf'])
     scheduler = WarmupLR(optimizer, **configs['scheduler_conf'])

@@ -10,19 +10,31 @@ class Loss(torch.nn.Module):
         vocab_size: int,
         ctc_weight: float = 0.5,
         reverse_weight: float = 0.0,
+        temp_scalar: int = 1,
+        ctc_distill_weight: float = 0.0,
+        att_distill_weight: float = 0.0,
         ignore_id: int = IGNORE_ID,
         lsm_weight: float = 0.0,
         length_normalized_loss: bool = False,
         reduce: bool = True,
         device: torch.device = torch.device("cpu"),
+        teacher: bool = False,
     ):
         super().__init__()
         self.vocab_size = vocab_size
         self.eos = vocab_size - 1
         self.device = device
         self.ignore_id = ignore_id
+        self.teacher = teacher
         self.ctc_weight = ctc_weight
         self.reverse_weight = reverse_weight
+        self.temp_scalar = temp_scalar
+        if self.teacher:
+            self.ctc_distill_weight = ctc_distill_weight
+            self.att_distill_weight = att_distill_weight
+        else:
+            self.ctc_distill_weight = 0.0
+            self.att_distill_weight = 0.0
 
         reduction_type = "sum" if reduce else "none"
         self.ctc_loss = torch.nn.CTCLoss(reduction=reduction_type)
@@ -43,17 +55,42 @@ class Loss(torch.nn.Module):
         loss_dict = dict()
         loss = torch.zeros(1).to(self.device)
         if self.ctc_weight != 0.0:
-            loss_ctc = self._calc_ctc_loss(outputs['ctc_lo_out'],
-                                           outputs['encoder_out_lens'], 
+            loss_ctc = self._calc_ctc_loss(outputs[0]['ctc_lo_out'],
+                                           outputs[0]['encoder_out_lens'],
                                            text, text_lengths)
             loss_dict['loss_ctc'] = loss_ctc
-            loss += loss_ctc * self.ctc_weight
+            if len(outputs) == 1:
+                loss += loss_ctc * self.ctc_weight
+            else:
+                loss += loss_ctc * self.ctc_weight * (1 - self.ctc_distill_weight)
         if self.ctc_weight != 1.0:
-            loss_att, acc_att = self._calc_att_loss(outputs['decoder_out'],
-                                           outputs['r_decoder_out'],
+            loss_att, acc_att = self._calc_att_loss(outputs[0]['decoder_out'],
+                                           outputs[0]['r_decoder_out'],
                                            text)
             loss_dict['loss_att'] = loss_att
-            loss += loss_att * (1.0 - self.ctc_weight)
+            if len(outputs) == 1:
+                loss += loss_att * (1 - self.ctc_weight)
+            else:
+                loss += loss_att * (1.0 - self.ctc_weight) * (1 - self.att_distill_weight)
+
+        if self.teacher and len(outputs) > 1:
+            if self.ctc_weight != 0.0:
+                loss_ctc_distill = self._calc_ce_distilling_loss(
+                    outputs[0]['ctc_lo_out'], outputs[1]['ctc_lo_out'])
+                loss_dict['loss_ctc_distill'] = loss_ctc_distill
+                loss += loss_ctc_distill * self.ctc_weight * self.ctc_distill_weight
+            if self.ctc_weight != 1.0:
+                loss_decoder_distill = self._calc_kl_distilling_loss(
+                    outputs[0]['decoder_out'], outputs[1]['decoder_out'])
+                if self.reverse_weight > 0.0:
+                    loss_r_decoder_distill = self._calc_kl_distilling_loss(
+                        outputs[0]['r_decoder_out'], outputs[1]['r_decoder_out'])
+                    loss_decoder_distill = \
+                        loss_decoder_distill * (1 - self.reverse_weight) + \
+                        loss_r_decoder_distill * self.reverse_weight
+                loss_dict['loss_decoder_distill'] = loss_decoder_distill
+                loss += loss_decoder_distill * (1 - self.ctc_weight) * self.att_distill_weight
+
         loss_dict['loss'] = loss
         return loss_dict
 
@@ -76,3 +113,13 @@ class Loss(torch.nn.Module):
             ignore_label=self.ignore_id,
         )
         return loss, acc_att
+
+    def _calc_ce_distilling_loss(self, y, label):
+        loss = F.cross_entropy(y, label.argmax(1))
+        return loss
+
+    def _calc_kl_distilling_loss(self, y, label):
+        p = F.log_softmax(y/self.temp_scalar, dim=-1)
+        q = F.softmax(label/self.temp_scalar, dim=-1)
+        loss = F.kl_div(p, q, reduction="none").sum() / y.size(0)
+        return loss

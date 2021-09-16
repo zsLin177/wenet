@@ -10,9 +10,9 @@ from torch.nn.utils import clip_grad_norm_
 
 
 class Executor:
-    def __init__(self, model, criterion, device, args):
+    def __init__(self, models, criterion, device, args):
         self.step = 0
-        self.model = model
+        self.models = models
         self.criterion = criterion
         self.device = device
         self.clip = args.get('grad_clip', 50.0)
@@ -25,7 +25,7 @@ class Executor:
     def train(self, optimizer, scheduler, data_loader, writer, scaler):
         ''' Train one epoch
         '''
-        self.model.train()
+        self.models[0].train()
         logging.info('using accumulate grad, new batch size is {} times'
                      'larger than before'.format(self.accum_grad))
         if self.use_amp:
@@ -46,7 +46,7 @@ class Executor:
             # Within this context, gradients will be accumulated on module
             # variables, which will later be synchronized.
             if self.is_distributed and batch_idx % self.accum_grad != 0:
-                context = self.model.no_sync
+                context = self.models[0].no_sync
             # Used for single gpu training and DDP gradient synchronization
             # processes.
             else:
@@ -56,8 +56,9 @@ class Executor:
                 # The more details about amp can be found in
                 # https://pytorch.org/docs/stable/notes/amp_examples.html
                 with torch.cuda.amp.autocast(scaler is not None):
-                    outputs = self.model(feats, feats_lengths,
-                                         target, target_lengths)
+                    outputs = []
+                    for model in self.models:
+                        outputs.append(model(feats, feats_lengths, target, target_lengths))
                     losses = self.criterion.get_losses(outputs, target, target_lengths)
                     loss = losses['loss'] / self.accum_grad
                 if self.use_amp:
@@ -72,7 +73,7 @@ class Executor:
                 # Use mixed precision training
                 if self.use_amp:
                     scaler.unscale_(optimizer)
-                    grad_norm = clip_grad_norm_(self.model.parameters(), self.clip)
+                    grad_norm = clip_grad_norm_(self.models[0].parameters(), self.clip)
                     # Must invoke scaler.update() if unscale_() is used in the
                     # iteration to avoid the following error:
                     #   RuntimeError: unscale_() has already been called
@@ -82,7 +83,7 @@ class Executor:
                     scaler.step(optimizer)
                     scaler.update()
                 else:
-                    grad_norm = clip_grad_norm_(self.model.parameters(), self.clip)
+                    grad_norm = clip_grad_norm_(self.models[0].parameters(), self.clip)
                     if torch.isfinite(grad_norm):
                         optimizer.step()
                 optimizer.zero_grad()
@@ -102,7 +103,7 @@ class Executor:
     def cv(self, data_loader):
         ''' Cross validation on
         '''
-        self.model.eval()
+        self.models[0].eval()
         # in order to avoid division by 0
         num_seen_utts = 1
         total_loss = 0.0
@@ -117,8 +118,7 @@ class Executor:
                 num_utts = target_lengths.size(0)
                 if num_utts == 0:
                     continue
-                outputs = self.model(feats, feats_lengths, target,
-                                     target_lengths)
+                outputs = self.models[0](feats, feats_lengths, target, target_lengths)
                 losses = self.criterion.get_losses(outputs, target, target_lengths)
                 loss = losses['loss']
                 if torch.isfinite(loss):
