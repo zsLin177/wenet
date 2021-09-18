@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from wenet.transformer.label_smoothing_loss import LabelSmoothingLoss
-from wenet.utils.common import (IGNORE_ID, th_accuracy, add_eos)
+from wenet.utils.common import (IGNORE_ID, th_accuracy, add_eos, reverse_pad_list)
 
 class Loss(torch.nn.Module):
     def __init__(
@@ -27,6 +27,7 @@ class Loss(torch.nn.Module):
         self.ignore_id = ignore_id
         self.teacher = teacher
         self.ctc_weight = ctc_weight
+        self.att_weight = (1 - ctc_weight)
         self.reverse_weight = reverse_weight
         self.temp_scalar = temp_scalar
         if self.teacher:
@@ -54,7 +55,7 @@ class Loss(torch.nn.Module):
     ):
         loss_dict = dict()
         loss = torch.zeros(1).to(self.device)
-        if self.ctc_weight != 0.0:
+        if self.ctc_weight != 0.0 and self.ctc_distill_weight != 1:
             loss_ctc = self._calc_ctc_loss(outputs[0]['ctc_lo_out'],
                                            outputs[0]['encoder_out_lens'],
                                            text, text_lengths)
@@ -63,19 +64,19 @@ class Loss(torch.nn.Module):
                 loss += loss_ctc * self.ctc_weight
             else:
                 loss += loss_ctc * self.ctc_weight * (1 - self.ctc_distill_weight)
-        if self.ctc_weight != 1.0:
+        if self.ctc_weight != 1.0 and self.att_distill_weight != 1:
             loss_att, acc_att = self._calc_att_loss(outputs[0]['decoder_out'],
                                            outputs[0]['r_decoder_out'],
-                                           text)
+                                           text, text_lengths)
             loss_dict['loss_att'] = loss_att
             if len(outputs) == 1:
                 loss += loss_att * (1 - self.ctc_weight)
             else:
-                loss += loss_att * (1.0 - self.ctc_weight) * (1 - self.att_distill_weight)
+                loss += loss_att * (1 - self.ctc_weight) * (1 - self.att_distill_weight)
 
         if self.teacher and len(outputs) > 1:
             if self.ctc_weight != 0.0:
-                loss_ctc_distill = self._calc_ce_distilling_loss(
+                loss_ctc_distill = self._calc_kl_distilling_loss(
                     outputs[0]['ctc_lo_out'], outputs[1]['ctc_lo_out'])
                 loss_dict['loss_ctc_distill'] = loss_ctc_distill
                 loss += loss_ctc_distill * self.ctc_weight * self.ctc_distill_weight
@@ -99,11 +100,14 @@ class Loss(torch.nn.Module):
         loss = loss / encoder_out.size(1)
         return loss
 
-    def _calc_att_loss(self, decoder_out, r_decoder_out, ys_pad: torch.Tensor):
+    def _calc_att_loss(self, decoder_out, r_decoder_out, ys_pad: torch.Tensor, ys_pad_lens: torch.Tensor):
         ys_out_pad = add_eos(ys_pad, self.eos, self.ignore_id)
         loss_att = self.criterion_att(decoder_out, ys_out_pad)
         r_loss_att = torch.tensor(0.0)
         if self.reverse_weight > 0.0:
+            # reverse the seq, used for right to left decoder
+            r_ys_pad = reverse_pad_list(ys_pad, ys_pad_lens, float(self.ignore_id))
+            r_ys_out_pad = add_eos(ys_pad, self.eos, self.ignore_id)
             r_loss_att = self.criterion_att(r_decoder_out, r_ys_out_pad)
         loss = loss_att * (
             1 - self.reverse_weight) + r_loss_att * self.reverse_weight
@@ -115,7 +119,8 @@ class Loss(torch.nn.Module):
         return loss, acc_att
 
     def _calc_ce_distilling_loss(self, y, label):
-        loss = F.cross_entropy(y, label.argmax(1))
+        y = y.transpose(1, 2)
+        loss = F.cross_entropy(y, label.argmax(-1))
         return loss
 
     def _calc_kl_distilling_loss(self, y, label):

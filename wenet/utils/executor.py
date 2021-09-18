@@ -118,7 +118,7 @@ class Executor:
                 num_utts = target_lengths.size(0)
                 if num_utts == 0:
                     continue
-                outputs = self.models[0](feats, feats_lengths, target, target_lengths)
+                outputs = [self.models[0](feats, feats_lengths, target, target_lengths)]
                 losses = self.criterion.get_losses(outputs, target, target_lengths)
                 loss = losses['loss']
                 if torch.isfinite(loss):
