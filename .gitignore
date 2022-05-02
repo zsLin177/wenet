@@ -36,3 +36,6 @@ data
 raw_wav
 tensorboard
 **/*build*
+
+# log files
+*.log

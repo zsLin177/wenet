@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import imp
 import logging
 import json
 import random
@@ -24,6 +25,8 @@ import torch
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 from torch.nn.utils.rnn import pad_sequence
+
+import pdb
 
 AUDIO_FORMAT_SETS = set(['flac', 'mp3', 'm4a', 'ogg', 'opus', 'wav', 'wma'])
 
@@ -271,7 +274,7 @@ def compute_fbank(data,
         sample_rate = sample['sample_rate']
         waveform = sample['wav']
         waveform = waveform * (1 << 15)
-        # Only keep key, feat, label
+        # Only keep key, feat, label or key, feat, label, bert
         mat = kaldi.fbank(waveform,
                           num_mel_bins=num_mel_bins,
                           frame_length=frame_length,
@@ -279,7 +282,11 @@ def compute_fbank(data,
                           dither=dither,
                           energy_floor=0.0,
                           sample_frequency=sample_rate)
-        yield dict(key=sample['key'], label=sample['label'], feat=mat)
+        if 'bert_token' not in sample:
+            yield dict(key=sample['key'], label=sample['label'], feat=mat)
+        else:
+            yield dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
+            bert_pad_idx=sample['bert_pad_idx'])
 
 
 def compute_mfcc(data,
@@ -346,7 +353,10 @@ def tokenize(data,
              symbol_table,
              bpe_model=None,
              non_lang_syms=None,
-             split_with_space=False):
+             split_with_space=False,
+             use_bert=False,
+             bert_path='bert_base_chinese',
+             max_fix_len=5):
     """ Decode text to chars or BPE
         Inplace operation
 
@@ -368,6 +378,11 @@ def tokenize(data,
         sp.load(bpe_model)
     else:
         sp = None
+
+    if use_bert:
+        from transformers import AutoTokenizer
+        bert_tokenizer = AutoTokenizer.from_pretrained(bert_path)
+        bert_pad_idx = bert_tokenizer.get_vocab()[bert_tokenizer.pad_token]
 
     for sample in data:
         assert 'txt' in sample
@@ -402,8 +417,21 @@ def tokenize(data,
 
         sample['tokens'] = tokens
         sample['label'] = label
+        if use_bert:
+            sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens)
+            sample['bert_pad_idx'] = bert_pad_idx
         yield sample
 
+
+def bert_tokenize(bert_tokenizer, tokens, add_cls=True, add_sep=True):
+    vocab = bert_tokenizer.get_vocab()
+    cls_idx, sep_idx = vocab[bert_tokenizer.cls_token], vocab[bert_tokenizer.sep_token]
+    res = [vocab[token] for token in tokens]
+    if add_cls:
+        res = [cls_idx] + res
+    if add_sep:
+        res = res + [sep_idx]
+    return res
 
 def spec_aug(data, num_t_mask=2, num_f_mask=2, max_t=50, max_f=10, max_w=80):
     """ Do spec augmentation
@@ -602,6 +630,8 @@ def padding(data):
             [sample[i]['feat'].size(0) for i in order], dtype=torch.int32)
         sorted_feats = [sample[i]['feat'] for i in order]
         sorted_keys = [sample[i]['key'] for i in order]
+        sorted_bert = [torch.tensor(sample[i]['bert_token'], dtype=torch.long) for i in order]
+        bert_pad_idx = sample[0]['bert_pad_idx']
         sorted_labels = [
             torch.tensor(sample[i]['label'], dtype=torch.int64) for i in order
         ]
@@ -614,6 +644,9 @@ def padding(data):
         padding_labels = pad_sequence(sorted_labels,
                                       batch_first=True,
                                       padding_value=-1)
+        padded_bert_tokenid = pad_sequence(sorted_bert,
+                                        batch_first=True,
+                                        padding_value=bert_pad_idx)
 
         yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
-               label_lengths)
+               label_lengths, padded_bert_tokenid)

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
+import random, pdb
 
 import torch
 import torch.distributed as dist
@@ -145,7 +145,9 @@ def Dataset(data_type,
         dataset = Processor(dataset, processor.parse_raw)
 
     dataset = Processor(dataset, processor.tokenize, symbol_table, bpe_model,
-                        non_lang_syms, conf.get('split_with_space', False))
+                        non_lang_syms, conf.get('split_with_space', False), 
+                        use_bert=conf.get('use_bert', False), bert_path=conf.get('bert_path', 'bert_base_chinese'),
+                        max_fix_len=conf.get('max_fix_len', 5))
     filter_conf = conf.get('filter_conf', {})
     dataset = Processor(dataset, processor.filter, **filter_conf)
 

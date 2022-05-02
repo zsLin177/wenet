@@ -33,6 +33,7 @@ from wenet.utils.common import (IGNORE_ID, add_sos_eos, log_add,
 from wenet.utils.mask import (make_pad_mask, mask_finished_preds,
                               mask_finished_scores, subsequent_mask)
 
+import pdb
 
 class ASRModel(torch.nn.Module):
     """CTC-attention hybrid Encoder-Decoder model"""

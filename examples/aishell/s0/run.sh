@@ -5,7 +5,7 @@
 
 # Use this to control how many gpu you use, It's 1-gpu training if you specify
 # just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+export CUDA_VISIBLE_DEVICES="1"
 # The NCCL_SOCKET_IFNAME variable specifies which IP interface to use for nccl
 # communication. More details can be found in
 # https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
@@ -23,7 +23,7 @@ num_nodes=1
 # on the second machine, and so on.
 node_rank=0
 # data
-data=/export/data/asr-data/OpenSLR/33/
+data=/opt/data/private/slzhou/datas/speech/downloads
 data_url=www.openslr.org/resources/33
 
 nj=16
@@ -43,16 +43,23 @@ train_set=train
 # 4. conf/train_unified_transformer.yaml: Unified dynamic chunk transformer
 # 5. conf/train_u2++_conformer.yaml: U2++ conformer
 # 6. conf/train_u2++_transformer.yaml: U2++ transformer
-train_config=conf/train_conformer.yaml
+# train_config=conf/train_conformer.yaml
+# dir=exp/conformer
+
+train_config=conf/train_transformer.yaml
+dir=exp/transformer
 cmvn=true
-dir=exp/conformer
-checkpoint=
+checkpoint=exp/transformer/50.pt
 
 # use average_checkpoint will get better result
-average_checkpoint=true
-decode_checkpoint=$dir/final.pt
-average_num=30
-decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_rescoring"
+# average_checkpoint=true
+average_checkpoint=false
+decode_checkpoint=$dir/avg_10_before50.pt
+average_num=10
+# decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_rescoring"
+decode_modes="ctc_greedy_search"
+# decode_modes="attention"
+
 
 . tools/parse_options.sh || exit 1;
 
@@ -176,14 +183,14 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
   {
     test_dir=$dir/test_${mode}
     mkdir -p $test_dir
-    python wenet/bin/recognize.py --gpu 0 \
+    python wenet/bin/recognize.py --gpu 1 \
       --mode $mode \
       --config $dir/train.yaml \
       --data_type $data_type \
       --test_data data/test/data.list \
       --checkpoint $decode_checkpoint \
       --beam_size 10 \
-      --batch_size 1 \
+      --batch_size 20 \
       --penalty 0.0 \
       --dict $dict \
       --ctc_weight $ctc_weight \

@@ -30,6 +30,8 @@ from wenet.utils.checkpoint import load_checkpoint
 from wenet.utils.file_utils import read_symbol_table, read_non_lang_symbols
 from wenet.utils.config import override_config
 
+import pdb
+
 def get_args():
     parser = argparse.ArgumentParser(description='recognize with your model')
     parser.add_argument('--config', required=True, help='config file')
@@ -127,6 +129,7 @@ def main():
 
     symbol_table = read_symbol_table(args.dict)
     test_conf = copy.deepcopy(configs['dataset_conf'])
+    test_conf.update(copy.deepcopy(configs['bert_conf']))
 
     test_conf['filter_conf']['max_length'] = 102400
     test_conf['filter_conf']['min_length'] = 0
@@ -172,11 +175,12 @@ def main():
     model.eval()
     with torch.no_grad(), open(args.result_file, 'w') as fout:
         for batch_idx, batch in enumerate(test_data_loader):
-            keys, feats, target, feats_lengths, target_lengths = batch
+            keys, feats, target, feats_lengths, target_lengths, bert_tokenids = batch
             feats = feats.to(device)
             target = target.to(device)
             feats_lengths = feats_lengths.to(device)
             target_lengths = target_lengths.to(device)
+            bert_tokenids = bert_tokenids.to(device)
             if args.mode == 'attention':
                 hyps, _ = model.recognize(
                     feats,
