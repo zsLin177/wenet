@@ -180,6 +180,7 @@ def main():
             target = target.to(device)
             feats_lengths = feats_lengths.to(device)
             target_lengths = target_lengths.to(device)
+            # [batch_size, seq_len] plus cls
             bert_tokenids = bert_tokenids.to(device)
             if args.mode == 'attention':
                 hyps, _ = model.recognize(

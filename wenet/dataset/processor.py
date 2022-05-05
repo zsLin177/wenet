@@ -418,7 +418,7 @@ def tokenize(data,
         sample['tokens'] = tokens
         sample['label'] = label
         if use_bert:
-            sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens)
+            sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens, add_sep=False)
             sample['bert_pad_idx'] = bert_pad_idx
         yield sample
 

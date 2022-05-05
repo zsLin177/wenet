@@ -1,11 +1,10 @@
-import imp
-import torch
+
 import torch.nn as nn
-from torch.nn import (TransformerEncoder, TransformerEncoderLayer)
+# from torch.nn import (TransformerEncoder, TransformerEncoderLayer)
 
 class CrossModalityAttention(nn.Module):
     '''
-    not_batch_first and not_norm_first
+    implmentation of cma
     '''
     def __init__(self,
                 d_model: int,

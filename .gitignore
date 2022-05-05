@@ -39,3 +39,6 @@ tensorboard
 
 # log files
 *.log
+
+# supar
+supar
