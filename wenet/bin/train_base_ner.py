@@ -27,14 +27,16 @@ import yaml
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
-from wenet.dataset.dataset import Dataset
+from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
+from wenet.transformer.sn_model import init_base_ner_model
 from wenet.utils.checkpoint import (load_checkpoint, save_checkpoint,
                                     load_trained_modules)
 from wenet.utils.executor import Executor
 from wenet.utils.file_utils import read_symbol_table, read_non_lang_symbols
 from wenet.utils.scheduler import WarmupLR
 from wenet.utils.config import override_config
+from wenet.utils.metric import SeqTagMetric
 
 def get_args():
     parser = argparse.ArgumentParser(description='training your network')
@@ -45,6 +47,7 @@ def get_args():
                         help='train and cv data type')
     parser.add_argument('--train_data', required=True, help='train data file')
     parser.add_argument('--cv_data', required=True, help='cv data file')
+    parser.add_argument('--ner_dict', required=True, help='ner label file')
     parser.add_argument('--gpu',
                         type=int,
                         default=-1,
@@ -120,7 +123,6 @@ def get_args():
 
 
     args = parser.parse_args()
-    print(args)
     
     return args
 
@@ -147,8 +149,15 @@ def main():
                                 rank=args.rank)
 
     symbol_table = read_symbol_table(args.symbol_table)
+    ner_label_table = read_symbol_table(args.ner_dict)
 
     train_conf = configs['dataset_conf']
+    train_conf['speed_perturb'] = False
+    train_conf['spec_aug'] = False
+    train_conf['spec_sub'] = False
+    train_conf.update(configs['bert_conf'])
+    train_conf.update(configs['ner_conf'])
+
     cv_conf = copy.deepcopy(train_conf)
     cv_conf['speed_perturb'] = False
     cv_conf['spec_aug'] = False
@@ -156,15 +165,16 @@ def main():
     cv_conf['shuffle'] = False
     non_lang_syms = read_non_lang_symbols(args.non_lang_syms)
 
-    train_dataset = Dataset(args.data_type, args.train_data, symbol_table,
-                            train_conf, args.bpe_model, non_lang_syms, True)
-    cv_dataset = Dataset(args.data_type,
+    train_dataset = BaseNerDataset(args.data_type, args.train_data, symbol_table,
+                            train_conf, args.bpe_model, non_lang_syms, True, ner_table=ner_label_table)
+    cv_dataset = BaseNerDataset(args.data_type,
                          args.cv_data,
                          symbol_table,
                          cv_conf,
                          args.bpe_model,
                          non_lang_syms,
-                         partition=False)
+                         partition=False,
+                         ner_table=ner_label_table)
 
     train_data_loader = DataLoader(train_dataset,
                                    batch_size=None,
@@ -177,25 +187,18 @@ def main():
                                 num_workers=args.num_workers,
                                 prefetch_factor=args.prefetch)
 
-    if 'fbank_conf' in configs['dataset_conf']:
-        input_dim = configs['dataset_conf']['fbank_conf']['num_mel_bins']
-    else:
-        input_dim = configs['dataset_conf']['mfcc_conf']['num_mel_bins']
     vocab_size = len(symbol_table)
 
     # Save configs to model_dir/train.yaml for inference and export
-    configs['input_dim'] = input_dim
-    configs['output_dim'] = vocab_size
-    configs['cmvn_file'] = args.cmvn
-    configs['is_json_cmvn'] = True
     if args.rank == 0:
         saved_config_path = os.path.join(args.model_dir, 'train.yaml')
         with open(saved_config_path, 'w') as fout:
             data = yaml.dump(configs)
             fout.write(data)
-
+    
+    configs['num_ner_labels'] = len(ner_label_table)
     # Init asr model from configs
-    model = init_asr_model(configs)
+    model = init_base_ner_model(configs)
     print(model)
     num_params = sum(p.numel() for p in model.parameters())
     print('the number of model params: {}'.format(num_params))
@@ -203,9 +206,9 @@ def main():
     # !!!IMPORTANT!!!
     # Try to export the model by script, if fails, we should refine
     # the code to satisfy the script export requirements
-    if args.rank == 0:
-        script_model = torch.jit.script(model)
-        script_model.save(os.path.join(args.model_dir, 'init.zip'))
+    # if args.rank == 0:
+    #     script_model = torch.jit.script(model)
+    #     script_model.save(os.path.join(args.model_dir, 'init.zip'))
     executor = Executor()
     # If specify checkpoint, load some info from checkpoint
     if args.checkpoint is not None:
@@ -264,27 +267,40 @@ def main():
     if args.use_amp:
         scaler = torch.cuda.amp.GradScaler()
 
+    best_metric = SeqTagMetric(ner_label_table)
     for epoch in range(start_epoch, num_epochs):
         train_dataset.set_epoch(epoch)
         configs['epoch'] = epoch
         lr = optimizer.param_groups[0]['lr']
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
-        executor.train(model, optimizer, scheduler, train_data_loader, device,
+        executor.train_basener(model, optimizer, scheduler, train_data_loader, device,
                        writer, configs, scaler)
-        total_loss, num_seen_utts = executor.cv(model, cv_data_loader, device,
-                                                configs)
+        total_loss, num_seen_utts, dev_metric = executor.eval_basener(model, cv_data_loader, device,
+                                                configs, ner_label_table)
         cv_loss = total_loss / num_seen_utts
 
         logging.info('Epoch {} CV info cv_loss {}'.format(epoch, cv_loss))
         if args.rank == 0:
-            save_model_path = os.path.join(model_dir, '{}.pt'.format(epoch))
+            # save_model_path = os.path.join(model_dir, '{}.pt'.format(epoch))
+            curr_save_model_path = os.path.join(model_dir, 'current.pt')
+            best_save_model_path = os.path.join(model_dir, 'best.pt')
             save_checkpoint(
-                model, save_model_path, {
-                    'epoch': epoch,
-                    'lr': lr,
-                    'cv_loss': cv_loss,
-                    'step': executor.step
-                })
+                    model, curr_save_model_path, {
+                        'epoch': epoch,
+                        'lr': lr,
+                        'cv_loss': cv_loss,
+                        'step': executor.step
+                    })
+            if dev_metric > best_metric:
+                save_checkpoint(
+                    model, best_save_model_path, {
+                        'epoch': epoch,
+                        'lr': lr,
+                        'cv_loss': cv_loss,
+                        'step': executor.step
+                    })
+                best_metric = dev_metric
+                logging.info('Epoch {} saved'.format(epoch))
             writer.add_scalar('epoch/cv_loss', cv_loss, epoch)
             writer.add_scalar('epoch/lr', lr, epoch)
         final_epoch = epoch

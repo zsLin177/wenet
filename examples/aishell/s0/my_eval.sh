@@ -13,16 +13,17 @@ export PATH=$PWD:${BUILD_DIR}:${BUILD_DIR}/kaldi:${OPENFST_PREFIX_DIR}/bin:$PATH
 export PYTHONIOENCODING=UTF-8
 export PYTHONPATH=../../../:$PYTHONPATH
 
-python wenet/bin/recognize.py --gpu 1 \
+python wenet/bin/recognize_ner.py --gpu 1 \
       --mode ctc_greedy_search \
-      --config exp/transformer/train.yaml \
+      --config exp/base_ner_debug/train.yaml \
       --data_type raw \
-      --test_data data/test/data.list \
-      --checkpoint exp/transformer/avg_10_before50.pt \
+      --test_data ner_data/test/data.list \
+      --checkpoint exp/base_ner_debug/11.pt \
       --beam_size 10 \
-      --batch_size 20 \
+      --batch_size 32 \
       --penalty 0.0 \
       --dict data/dict/lang_char.txt \
+      --ner_dict ner_data/dict/ner_label.txt \
       --ctc_weight 0.5 \
       --reverse_weight 0.0 \
-      --result_file exp/transformer/test_ctc_greedy_search/text
+      --result_file exp/base_ner_debug/test_pred.txt

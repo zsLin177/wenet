@@ -116,13 +116,50 @@ class DataList(IterableDataset):
             yield data
 
 
+def BaseNerDataset(data_type,
+            data_list_file,
+            symbol_table,
+            conf,
+            bpe_model=None,
+            non_lang_syms=None,
+            partition=True,
+            ner_table=None):
+    lists = read_lists(data_list_file)
+    shuffle = conf.get('shuffle', True)
+    dataset = DataList(lists, shuffle=shuffle, partition=partition)
+    
+    dataset = Processor(dataset, processor.filte_speech)
+
+    dataset = Processor(dataset, processor.tokenize_ner, symbol_table, bpe_model,
+                        non_lang_syms, conf.get('split_with_space', False), 
+                        use_bert=conf.get('use_bert', False), bert_path=conf.get('bert_path', 'bert_base_chinese'),
+                        max_fix_len=conf.get('max_fix_len', 5), ner_table=ner_table, with_ner=conf.get('with_ner', False))
+    filter_conf = conf.get('filter_conf', {})
+    dataset = Processor(dataset, processor.filter_ner, **filter_conf)
+
+    if shuffle:
+        shuffle_conf = conf.get('shuffle_conf', {})
+        dataset = Processor(dataset, processor.shuffle, **shuffle_conf)
+
+    sort = conf.get('sort', True)
+    if sort:
+        sort_conf = conf.get('sort_conf', {})
+        dataset = Processor(dataset, processor.sort_ner, **sort_conf)
+
+    batch_conf = conf.get('batch_conf', {})
+    dataset = Processor(dataset, processor.batch, **batch_conf)
+    dataset = Processor(dataset, processor.padding_ner)
+    return dataset
+
+
 def Dataset(data_type,
             data_list_file,
             symbol_table,
             conf,
             bpe_model=None,
             non_lang_syms=None,
-            partition=True):
+            partition=True,
+            ner_table=None):
     """ Construct dataset from arguments
 
         We have two shuffle stage in the Dataset. The first is global
@@ -147,7 +184,7 @@ def Dataset(data_type,
     dataset = Processor(dataset, processor.tokenize, symbol_table, bpe_model,
                         non_lang_syms, conf.get('split_with_space', False), 
                         use_bert=conf.get('use_bert', False), bert_path=conf.get('bert_path', 'bert_base_chinese'),
-                        max_fix_len=conf.get('max_fix_len', 5))
+                        max_fix_len=conf.get('max_fix_len', 5), ner_table=ner_table, with_ner=conf.get('with_ner', False))
     filter_conf = conf.get('filter_conf', {})
     dataset = Processor(dataset, processor.filter, **filter_conf)
 

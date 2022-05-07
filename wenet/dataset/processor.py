@@ -112,6 +112,30 @@ def tar_file_and_group(data):
         sample['stream'].close()
 
 
+def filte_speech(data):
+    """ Parse key/wav/txt from json line
+
+        Args:
+            data: Iterable[str], str is a json line has key/wav/txt
+
+        Returns:
+            Iterable[{key, txt, ner_seq}]
+    """
+    for sample in data:
+        assert 'src' in sample
+        json_line = sample['src']
+        obj = json.loads(json_line)
+        assert 'key' in obj
+        assert 'wav' in obj
+        assert 'txt' in obj
+        key = obj['key']
+        txt = obj['txt']
+        ner_seq = obj['ner_seq']
+        example = dict(key=key,
+                        txt=txt,
+                        ner_seq=ner_seq)
+        yield example
+
 def parse_raw(data):
     """ Parse key/wav/txt from json line
 
@@ -131,6 +155,7 @@ def parse_raw(data):
         key = obj['key']
         wav_file = obj['wav']
         txt = obj['txt']
+        ner_seq = obj['ner_seq']
         try:
             if 'start' in obj:
                 assert 'end' in obj
@@ -147,11 +172,27 @@ def parse_raw(data):
             example = dict(key=key,
                            txt=txt,
                            wav=waveform,
-                           sample_rate=sample_rate)
+                           sample_rate=sample_rate,
+                           ner_seq=ner_seq)
             yield example
         except Exception as ex:
             logging.warning('Failed to read {}'.format(wav_file))
 
+
+def filter_ner(data,
+           max_length=10240,
+           min_length=10,
+           token_max_length=200,
+           token_min_length=1,
+           min_output_input_ratio=0.0005,
+           max_output_input_ratio=1):
+    for sample in data:
+        assert 'tokens' in sample
+        if len(sample['tokens']) < token_min_length:
+            continue
+        if len(sample['tokens']) > token_max_length:
+            continue
+        yield sample
 
 def filter(data,
            max_length=10240,
@@ -283,10 +324,20 @@ def compute_fbank(data,
                           energy_floor=0.0,
                           sample_frequency=sample_rate)
         if 'bert_token' not in sample:
-            yield dict(key=sample['key'], label=sample['label'], feat=mat)
+            res = dict(key=sample['key'], label=sample['label'], feat=mat)
+            # yield dict(key=sample['key'], label=sample['label'], feat=mat)
         else:
-            yield dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
+            res = dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
             bert_pad_idx=sample['bert_pad_idx'])
+            # yield dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
+            # bert_pad_idx=sample['bert_pad_idx'])
+        
+        if 'ner_label' not in sample:
+            yield res
+        else:
+            res['ner_label'] = sample['ner_label']
+            res['ner_pad_idx'] = sample['ner_pad_idx']
+            yield res
 
 
 def compute_mfcc(data,
@@ -348,6 +399,53 @@ def __tokenize_by_bpe_model(sp, txt):
 
     return tokens
 
+def tokenize_ner(data,
+             symbol_table,
+             bpe_model=None,
+             non_lang_syms=None,
+             split_with_space=False,
+             use_bert=False,
+             bert_path='bert_base_chinese',
+             max_fix_len=5,
+             ner_table=None,
+             with_ner=False):
+    '''
+    just tokenize ner without speech
+    '''
+    if use_bert:
+        from transformers import AutoTokenizer
+        bert_tokenizer = AutoTokenizer.from_pretrained(bert_path)
+        bert_pad_idx = bert_tokenizer.get_vocab()[bert_tokenizer.pad_token]
+
+    for sample in data:
+        assert 'txt' in sample
+        txt = sample['txt'].strip()
+        parts = [txt]
+
+        label = []
+        tokens = []
+        for part in parts:
+            for ch in part:
+                if ch == ' ':
+                    ch = "▁"
+                tokens.append(ch)
+        
+        for ch in tokens:
+            if ch in symbol_table:
+                label.append(symbol_table[ch])
+            elif '<unk>' in symbol_table:
+                label.append(symbol_table['<unk>'])
+        
+        sample['tokens'] = tokens
+        if use_bert:
+            sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens, add_sep=False)
+            sample['bert_pad_idx'] = bert_pad_idx
+        if with_ner:
+            O_id = ner_table.get('O')
+            sample['ner_label'] = [ner_table.get(ner, O_id) for ner in sample['ner_seq']] 
+            sample['ner_pad_idx'] = O_id
+        yield sample
+
 
 def tokenize(data,
              symbol_table,
@@ -356,7 +454,9 @@ def tokenize(data,
              split_with_space=False,
              use_bert=False,
              bert_path='bert_base_chinese',
-             max_fix_len=5):
+             max_fix_len=5,
+             ner_table=None,
+             with_ner=False):
     """ Decode text to chars or BPE
         Inplace operation
 
@@ -420,13 +520,23 @@ def tokenize(data,
         if use_bert:
             sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens, add_sep=False)
             sample['bert_pad_idx'] = bert_pad_idx
+        if with_ner:
+            O_id = ner_table.get('O')
+            sample['ner_label'] = [ner_table.get(ner, O_id) for ner in sample['ner_seq']] 
+            sample['ner_pad_idx'] = O_id
         yield sample
 
 
 def bert_tokenize(bert_tokenizer, tokens, add_cls=True, add_sep=True):
     vocab = bert_tokenizer.get_vocab()
     cls_idx, sep_idx = vocab[bert_tokenizer.cls_token], vocab[bert_tokenizer.sep_token]
-    res = [vocab[token] for token in tokens]
+    unk_idx = vocab[bert_tokenizer.unk_token]
+    res = []
+    for token in tokens:
+        if token in vocab:
+            res.append(vocab[token])
+        else:
+            res.append(unk_idx)
     if add_cls:
         res = [cls_idx] + res
     if add_sep:
@@ -523,6 +633,32 @@ def shuffle(data, shuffle_size=10000):
     for x in buf:
         yield x
 
+def sort_ner(data, sort_size=500):
+    """ Sort the data by tokens length.
+        Sort is used after shuffle and before batch, so we can group
+        utts with similar lengths into a batch, and `sort_size` should
+        be less than `shuffle_size`
+
+        Args:
+            data: Iterable[{key, feat, label}]
+            sort_size: buffer size for sort
+
+        Returns:
+            Iterable[{key, feat, label}]
+    """
+
+    buf = []
+    for sample in data:
+        buf.append(sample)
+        if len(buf) >= sort_size:
+            buf.sort(key=lambda x: len(x['tokens']))
+            for x in buf:
+                yield x
+            buf = []
+    # The sample left over
+    buf.sort(key=lambda x: len(x['tokens']))
+    for x in buf:
+        yield x
 
 def sort(data, sort_size=500):
     """ Sort the data by feature length.
@@ -632,6 +768,10 @@ def padding(data):
         sorted_keys = [sample[i]['key'] for i in order]
         sorted_bert = [torch.tensor(sample[i]['bert_token'], dtype=torch.long) for i in order]
         bert_pad_idx = sample[0]['bert_pad_idx']
+
+        sorted_ner = [torch.tensor(sample[i]['ner_label'], dtype=torch.long) for i in order]
+        ner_pad_idx = sample[0]['ner_pad_idx']
+
         sorted_labels = [
             torch.tensor(sample[i]['label'], dtype=torch.int64) for i in order
         ]
@@ -647,6 +787,35 @@ def padding(data):
         padded_bert_tokenid = pad_sequence(sorted_bert,
                                         batch_first=True,
                                         padding_value=bert_pad_idx)
+        padded_ner_seq = pad_sequence(sorted_ner, batch_first=True, padding_value=ner_pad_idx)
 
         yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
-               label_lengths, padded_bert_tokenid)
+               label_lengths, padded_bert_tokenid, padded_ner_seq)
+
+def padding_ner(data):
+    """ Padding the data into training data
+
+        Args:
+            data: Iterable[List[{key, feat, label}]]
+
+        Returns:
+            Iterable[Tuple(keys, feats, labels, feats lengths, label lengths)]
+    """
+    for sample in data:
+        assert isinstance(sample, list)
+        txt_length = torch.tensor([len(x['tokens']) for x in sample],
+                                    dtype=torch.int32)
+        order = torch.argsort(txt_length, descending=True)
+        sorted_keys = [sample[i]['key'] for i in order]
+        sorted_bert = [torch.tensor(sample[i]['bert_token'], dtype=torch.long) for i in order]
+        bert_pad_idx = sample[0]['bert_pad_idx']
+
+        sorted_ner = [torch.tensor(sample[i]['ner_label'], dtype=torch.long) for i in order]
+        ner_pad_idx = sample[0]['ner_pad_idx']
+
+        padded_bert_tokenid = pad_sequence(sorted_bert,
+                                        batch_first=True,
+                                        padding_value=bert_pad_idx)
+        padded_ner_seq = pad_sequence(sorted_ner, batch_first=True, padding_value=ner_pad_idx)
+
+        yield (sorted_keys, padded_bert_tokenid, padded_ner_seq)

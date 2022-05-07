@@ -21,8 +21,11 @@ bert_conf:
     out_dim: 512
     dropout: 0.1
     pad_idx: 0
+    bos_idx: 101
     
-
+# ner related
+ner_conf:
+    with_ner: true
 
 # decoder related
 decoder: transformer
@@ -69,16 +72,16 @@ dataset_conf:
         sort_size: 500  # sort_size should be less than shuffle_size
     batch_conf:
         batch_type: 'static' # static or dynamic
-        batch_size: 16
+        batch_size: 64
 
 grad_clip: 5
-accum_grad: 2
-max_epoch: 240
+accum_grad: 1
+max_epoch: 30
 log_interval: 100
 
 optim: adam
 optim_conf:
-    lr: 0.002
+    lr: 0.00005
 scheduler: warmuplr     # pytorch v1.1.0+ required
 scheduler_conf:
-    warmup_steps: 25000
+    warmup_steps: 1000

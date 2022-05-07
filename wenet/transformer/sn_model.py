@@ -69,7 +69,20 @@ class BaseNerModel(nn.Module):
         loss = -CRFLinearChain(score[:, 1:], mask[:, 1:], self.trans).log_prob(gold_labels).sum() / seq_len
         return loss
         
-
+def init_base_ner_model(configs):
+    n_labels = configs['num_ner_labels']
+    bert = configs['bert_conf']['bert_path']
+    bert_out_dim = configs['bert_conf']['out_dim']
+    bert_n_layers = configs['bert_conf']['used_layers']
+    bert_dropout = configs['bert_conf']['dropout']
+    bert_pad_idx = configs['bert_conf']['pad_idx']
+    model = BaseNerModel(n_labels, 
+                        bert, 
+                        bert_out_dim,
+                        bert_n_layers,
+                        bert_dropout,
+                        bert_pad_idx=bert_pad_idx)
+    return model
 
 class SANModel(nn.Module):
     '''
