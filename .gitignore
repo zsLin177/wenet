@@ -40,7 +40,5 @@ tensorboard
 # log files
 *.log
 
-# supar
-supar
 # nerdata
 ner_data
