@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 
 from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_base_ner_model
+from wenet.transformer.sn_model import init_lstmbase_model
 from wenet.utils.checkpoint import (load_checkpoint, save_checkpoint,
                                     load_trained_modules)
 from wenet.utils.executor import Executor
@@ -203,7 +203,7 @@ def main():
     configs['num_ner_labels'] = len(ner_label_table)
     configs['ner_dict'] = {v: k for k, v in ner_label_table.items()}
     # Init asr model from configs
-    model = init_base_ner_model(configs)
+    model = init_lstmbase_model(configs)
     print(model)
     num_params = sum(p.numel() for p in model.parameters())
     print('the number of model params: {}'.format(num_params))
@@ -279,9 +279,9 @@ def main():
         configs['epoch'] = epoch
         lr = optimizer.param_groups[0]['lr']
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
-        executor.train_basener(model, optimizer, scheduler, train_data_loader, device,
+        executor.train_lstmbasener(model, optimizer, scheduler, train_data_loader, device,
                        writer, configs, scaler)
-        total_loss, num_seen_utts, dev_metric = executor.eval_basener(model, cv_data_loader, device,
+        total_loss, num_seen_utts, dev_metric = executor.eval_lstmbasener(model, cv_data_loader, device,
                                                 configs, ner_label_table)
         cv_loss = total_loss / num_seen_utts
 

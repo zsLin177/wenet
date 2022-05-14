@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader
 
 from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_base_ner_model
+from wenet.transformer.sn_model import init_lstmbase_model
 from wenet.utils.checkpoint import load_checkpoint
 from wenet.utils.file_utils import read_symbol_table, read_non_lang_symbols
 from wenet.utils.config import override_config
@@ -170,7 +170,7 @@ def main():
 
     configs['num_ner_labels'] = len(ner_table)
     # Init asr model from configs
-    model = init_base_ner_model(configs)
+    model = init_lstmbase_model(configs)
 
     # Load dict
     # char_dict = {v: k for k, v in symbol_table.items()}
@@ -189,22 +189,25 @@ def main():
     bert_pad_idx = configs['bert_conf']['pad_idx']
     bert_bos_idx = configs['bert_conf']['bos_idx']
 
+    char_pad_idx = configs['lstm_conf']['char_pad_idx']
+    char_bos_idx = configs['lstm_conf']['char_bos_idx']
+    sum_num_sents = 0
     with torch.no_grad(), open(args.result_file, 'w') as fout:
         for batch_idx, batch in enumerate(test_data_loader):
-            keys, bert_tokenids, ner_seq = batch
+            keys, bert_tokenids, ner_seq, char_tokenids = batch
             # [batch_size, seq_len] plus cls
-            bert_tokenids = bert_tokenids.to(device)
+            # bert_tokenids = bert_tokenids.to(device)
             ner_seq = ner_seq.to(device)
-
-            score = model(bert_tokenids)
-            mask = bert_tokenids.ne(bert_pad_idx) & bert_tokenids.ne(bert_bos_idx)
+            char_tokenids = char_tokenids.to(device)
+            score = model(char_tokenids)
+            mask = char_tokenids.ne(char_pad_idx) & char_tokenids.ne(char_bos_idx)
             loss = model.loss(score, ner_seq, mask)
             preds = model.decode(score, mask)
             mask = mask[:, 1:]
             metric(preds.masked_fill(~mask, -1), ner_seq.masked_fill(~mask, -1))
             lengths = mask.sum(-1).tolist()
             preds = preds.tolist()
-
+            sum_num_sents += ner_seq.size(0)
             
             for i, key in enumerate(keys):
                 content = []
@@ -217,6 +220,7 @@ def main():
     pred_file = args.result_file
     gold_file = args.test_data
     nested_ner_F, indicators = call_as_metric(pred_file, gold_file)
+    logging.debug(f'test sum sents:{sum_num_sents}')
     logging.debug(f'nested: P: {indicators[0][0]:6.2%} R: {indicators[0][1]:6.2%} F: {indicators[0][2]:6.2%}')
     logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
 

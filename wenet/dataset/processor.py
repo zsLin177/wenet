@@ -422,7 +422,7 @@ def tokenize_ner(data,
         txt = sample['txt'].strip()
         parts = [txt]
 
-        label = []
+        char_idxs = [symbol_table['<sos/eos>']]
         tokens = []
         for part in parts:
             for ch in part:
@@ -432,11 +432,13 @@ def tokenize_ner(data,
         
         for ch in tokens:
             if ch in symbol_table:
-                label.append(symbol_table[ch])
+                char_idxs.append(symbol_table[ch])
             elif '<unk>' in symbol_table:
-                label.append(symbol_table['<unk>'])
+                char_idxs.append(symbol_table['<unk>'])
         
         sample['tokens'] = tokens
+        sample['char_idxs'] = char_idxs
+        sample['char_pad_idx'] = symbol_table.get('<pad>', -1)
         if use_bert:
             sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens, add_sep=False)
             sample['bert_pad_idx'] = bert_pad_idx
@@ -807,15 +809,20 @@ def padding_ner(data):
                                     dtype=torch.int32)
         order = torch.argsort(txt_length, descending=True)
         sorted_keys = [sample[i]['key'] for i in order]
+        sorted_char = [torch.tensor(sample[i]['char_idxs'], dtype=torch.long) for i in order]
+        char_pad_idx = sample[0]['char_pad_idx']
         sorted_bert = [torch.tensor(sample[i]['bert_token'], dtype=torch.long) for i in order]
         bert_pad_idx = sample[0]['bert_pad_idx']
 
         sorted_ner = [torch.tensor(sample[i]['ner_label'], dtype=torch.long) for i in order]
         ner_pad_idx = sample[0]['ner_pad_idx']
 
+        padded_char_tokenid = pad_sequence(sorted_char,
+                                        batch_first=True,
+                                        padding_value=char_pad_idx)
         padded_bert_tokenid = pad_sequence(sorted_bert,
                                         batch_first=True,
                                         padding_value=bert_pad_idx)
         padded_ner_seq = pad_sequence(sorted_ner, batch_first=True, padding_value=ner_pad_idx)
 
-        yield (sorted_keys, padded_bert_tokenid, padded_ner_seq)
+        yield (sorted_keys, padded_bert_tokenid, padded_ner_seq, padded_char_tokenid)

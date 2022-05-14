@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 
 from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_base_ner_model
+from wenet.transformer.sn_model import init_speech_ner_model
 from wenet.utils.checkpoint import (load_checkpoint, save_checkpoint,
                                     load_trained_modules)
 from wenet.utils.executor import Executor
@@ -58,6 +58,10 @@ def get_args():
                         default=777,
                         type=int,
                         help='set seed')
+    parser.add_argument('--ctcw',
+                        required=True,
+                        type=float,
+                        help='ctc loss weight')
     parser.add_argument('--tensorboard_dir',
                         default='tensorboard',
                         help='tensorboard log dir')
@@ -144,6 +148,8 @@ def main():
     if len(args.override_config) > 0:
         configs = override_config(configs, args.override_config)
 
+    configs['ctcw'] = args.ctcw
+
     distributed = args.world_size > 1
     if distributed:
         logging.info('training on multiple gpus, this gpu {}'.format(args.gpu))
@@ -169,9 +175,9 @@ def main():
     cv_conf['shuffle'] = False
     non_lang_syms = read_non_lang_symbols(args.non_lang_syms)
 
-    train_dataset = BaseNerDataset(args.data_type, args.train_data, symbol_table,
+    train_dataset = Dataset(args.data_type, args.train_data, symbol_table,
                             train_conf, args.bpe_model, non_lang_syms, True, ner_table=ner_label_table)
-    cv_dataset = BaseNerDataset(args.data_type,
+    cv_dataset = Dataset(args.data_type,
                          args.cv_data,
                          symbol_table,
                          cv_conf,
@@ -191,7 +197,17 @@ def main():
                                 num_workers=args.num_workers,
                                 prefetch_factor=args.prefetch)
 
+    if 'fbank_conf' in configs['dataset_conf']:
+        input_dim = configs['dataset_conf']['fbank_conf']['num_mel_bins']
+    else:
+        input_dim = configs['dataset_conf']['mfcc_conf']['num_mel_bins']
     vocab_size = len(symbol_table)
+
+    # Save configs to model_dir/train.yaml for inference and export
+    configs['input_dim'] = input_dim
+    configs['output_dim'] = vocab_size
+    configs['cmvn_file'] = args.cmvn
+    configs['is_json_cmvn'] = True
 
     # Save configs to model_dir/train.yaml for inference and export
     if args.rank == 0:
@@ -203,7 +219,7 @@ def main():
     configs['num_ner_labels'] = len(ner_label_table)
     configs['ner_dict'] = {v: k for k, v in ner_label_table.items()}
     # Init asr model from configs
-    model = init_base_ner_model(configs)
+    model = init_speech_ner_model(configs)
     print(model)
     num_params = sum(p.numel() for p in model.parameters())
     print('the number of model params: {}'.format(num_params))
@@ -229,8 +245,9 @@ def main():
 
     num_epochs = configs.get('max_epoch', 100)
     model_dir = args.model_dir
-    writer = None
     configs['model_dir'] = model_dir
+
+    writer = None
     if args.rank == 0:
         os.makedirs(model_dir, exist_ok=True)
         exp_id = os.path.basename(model_dir)
@@ -273,15 +290,16 @@ def main():
     if args.use_amp:
         scaler = torch.cuda.amp.GradScaler()
 
-    best_metric = SeqTagMetric(ner_label_table)
+    # best_metric = SeqTagMetric(ner_label_table)
+    best_metric = 0.0
     for epoch in range(start_epoch, num_epochs):
         train_dataset.set_epoch(epoch)
         configs['epoch'] = epoch
         lr = optimizer.param_groups[0]['lr']
         logging.info('Epoch {} TRAIN info lr {}'.format(epoch, lr))
-        executor.train_basener(model, optimizer, scheduler, train_data_loader, device,
+        executor.train_spner(model, optimizer, scheduler, train_data_loader, device,
                        writer, configs, scaler)
-        total_loss, num_seen_utts, dev_metric = executor.eval_basener(model, cv_data_loader, device,
+        total_loss, num_seen_utts, dev_metric = executor.eval_spner(model, cv_data_loader, device,
                                                 configs, ner_label_table)
         cv_loss = total_loss / num_seen_utts
 

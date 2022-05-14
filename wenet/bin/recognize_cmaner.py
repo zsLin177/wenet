@@ -17,6 +17,7 @@ from __future__ import print_function
 import argparse
 from cgi import test
 import copy
+import imp
 import logging
 import os
 import sys
@@ -25,9 +26,9 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from wenet.dataset.dataset import Dataset, BaseNerDataset
+from wenet.dataset.dataset import Dataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_base_ner_model
+from wenet.transformer.sn_model import init_speech_ner_model, init_cma_model
 from wenet.utils.checkpoint import load_checkpoint
 from wenet.utils.file_utils import read_symbol_table, read_non_lang_symbols
 from wenet.utils.config import override_config
@@ -157,7 +158,7 @@ def main():
     test_conf['batch_conf']['batch_size'] = args.batch_size
     non_lang_syms = read_non_lang_symbols(args.non_lang_syms)
 
-    test_dataset = BaseNerDataset(args.data_type,
+    test_dataset = Dataset(args.data_type,
                            args.test_data,
                            symbol_table,
                            test_conf,
@@ -168,58 +169,60 @@ def main():
 
     test_data_loader = DataLoader(test_dataset, batch_size=None, num_workers=0)
 
-    configs['num_ner_labels'] = len(ner_table)
     # Init asr model from configs
-    model = init_base_ner_model(configs)
+    configs['num_ner_labels'] = len(ner_table)
+    model = init_cma_model(configs)
 
     # Load dict
-    # char_dict = {v: k for k, v in symbol_table.items()}
-    # eos = len(char_dict) - 1
-
-    ner_dict = {v: k for k, v in ner_table.items()}
-
+    char_dict = {v: k for k, v in symbol_table.items()}
+    eos = len(char_dict) - 1
 
     load_checkpoint(model, args.checkpoint)
     use_cuda = args.gpu >= 0 and torch.cuda.is_available()
     device = torch.device('cuda' if use_cuda else 'cpu')
     model = model.to(device)
-    metric = SeqTagMetric(ner_dict)
+
     model.eval()
 
     bert_pad_idx = configs['bert_conf']['pad_idx']
     bert_bos_idx = configs['bert_conf']['bos_idx']
+    ner_dict = {v: k for k, v in ner_table.items()}
+    metric = SeqTagMetric(ner_dict)
 
-    with torch.no_grad(), open(args.result_file, 'w') as fout:
+    with torch.no_grad():
+        fout2 = open(args.result_file, 'w')
         for batch_idx, batch in enumerate(test_data_loader):
-            keys, bert_tokenids, ner_seq = batch
+            keys, feats, target, feats_lengths, target_lengths, bert_tokenids, ner_seq = batch
+            feats = feats.to(device)
+            target = target.to(device)
+            feats_lengths = feats_lengths.to(device)
+            target_lengths = target_lengths.to(device)
             # [batch_size, seq_len] plus cls
             bert_tokenids = bert_tokenids.to(device)
             ner_seq = ner_seq.to(device)
 
-            score = model(bert_tokenids)
+            score, encoder_out, encoder_out_lens = model(feats, feats_lengths, bert_tokenids)
             mask = bert_tokenids.ne(bert_pad_idx) & bert_tokenids.ne(bert_bos_idx)
-            loss = model.loss(score, ner_seq, mask)
-            preds = model.decode(score, mask)
+            # loss = model.loss(score, ner_seq, mask)
+            ner_preds = model.decode(score, mask)
             mask = mask[:, 1:]
-            metric(preds.masked_fill(~mask, -1), ner_seq.masked_fill(~mask, -1))
+            metric(ner_preds.masked_fill(~mask, -1), ner_seq.masked_fill(~mask, -1))
             lengths = mask.sum(-1).tolist()
-            preds = preds.tolist()
+            ner_preds = ner_preds.tolist()
 
             
             for i, key in enumerate(keys):
-                content = []
-                for w in preds[i][0:lengths[i]]:
-                    content.append(ner_dict[w])
-                logging.info('{} [{}]'.format(key, ','.join(content)))
-                fout.write('{} [{}]\n'.format(key, ','.join(content)))
-        logging.info('- {}\n'.format(metric))
-    
+
+                content2 = []
+                for w in ner_preds[i][0:lengths[i]]:
+                    content2.append(ner_dict[w])
+                logging.info('{} [{}]'.format(key, ','.join(content2)))
+                fout2.write('{} [{}]\n'.format(key, ','.join(content2)))         
+    fout2.close()
     pred_file = args.result_file
     gold_file = args.test_data
     nested_ner_F, indicators = call_as_metric(pred_file, gold_file)
     logging.debug(f'nested: P: {indicators[0][0]:6.2%} R: {indicators[0][1]:6.2%} F: {indicators[0][2]:6.2%}')
     logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
-
-
 if __name__ == '__main__':
     main()

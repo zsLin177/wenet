@@ -155,7 +155,7 @@ if __name__ == "__main__":
     from transformers import AutoTokenizer, AutoModel
     bert_path = '/opt/data/private/slzhou/PLMs/bert-base-chinese'
     tokenizer = AutoTokenizer.from_pretrained(bert_path)
-    text = ['我喜欢你', '你喜欢我吗']
+    text = ['我喜欢吃年糕', '你喜欢吃年糕吗']
     encoder_input = tokenizer(text, padding=True, truncation=True, max_length=512, return_tensors="pt")
     model = AutoModel.from_pretrained(bert_path)
     out_put = model(**encoder_input)

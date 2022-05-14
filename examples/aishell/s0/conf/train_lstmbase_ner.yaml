@@ -2,10 +2,10 @@
 # encoder related
 encoder: transformer
 encoder_conf:
-    output_size: 256    # dimension of attention
-    attention_heads: 4
+    output_size: 512    # dimension of attention
+    attention_heads: 8
     linear_units: 2048  # the number of units of position-wise feed forward
-    num_blocks: 12      # the number of encoder blocks
+    num_blocks: 6      # the number of encoder blocks
     dropout_rate: 0.1
     positional_dropout_rate: 0.1
     attention_dropout_rate: 0.0
@@ -22,6 +22,15 @@ bert_conf:
     dropout: 0.1
     pad_idx: 0
     bos_idx: 101
+
+lstm_conf:
+    n_char_embed: 50
+    n_lstm_hidden: 300
+    n_lstm_layers: 4
+    lstm_dropout: 0.33
+    char_pad_idx: 2
+    char_bos_idx: 3745
+    num_chars: 3746
     
 # ner related
 ner_conf:
@@ -40,6 +49,7 @@ decoder_conf:
 
 # hybrid CTC/attention
 model_conf:
+    masked_ctc: true
     ctc_weight: 0.3
     lsm_weight: 0.1     # label smoothing option
     length_normalized_loss: false
@@ -76,12 +86,15 @@ dataset_conf:
 
 grad_clip: 5
 accum_grad: 1
-max_epoch: 10
+max_epoch: 100
 log_interval: 100
 
 optim: adam
 optim_conf:
-    lr: 0.00001
+    lr: 0.001
 scheduler: warmuplr     # pytorch v1.1.0+ required
 scheduler_conf:
-    warmup_steps: 2000
+    warmup_steps: 4000
+
+eval_conf:
+    gold_file: '/opt/data/private/slzhou/wenet/examples/aishell/s0/ner_data/dev/data.list'
