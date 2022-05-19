@@ -222,7 +222,7 @@ def main():
     pred_file = args.result_file
     gold_file = args.test_data
     nested_ner_F, indicators = call_as_metric(pred_file, gold_file)
-    logging.debug(f'nested: P: {indicators[0][0]:6.2%} R: {indicators[0][1]:6.2%} F: {indicators[0][2]:6.2%}')
-    logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
+    logging.debug(f'P: {indicators[0]:6.2%} R: {indicators[1]:6.2%} F: {indicators[2]:6.2%}')
+    # logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
 if __name__ == '__main__':
     main()

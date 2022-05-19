@@ -7,19 +7,19 @@ export PATH=$PWD:${BUILD_DIR}:${BUILD_DIR}/kaldi:${OPENFST_PREFIX_DIR}/bin:$PATH
 export PYTHONIOENCODING=UTF-8
 export PYTHONPATH=../../../:$PYTHONPATH
 
-nohup python wenet/bin/train_cma.py --gpu 0 \
-      --config conf/train_speech_ner.yaml \
-      --seed 0 \
+python wenet/bin/train_cma.py --gpu 1 \
+      --config conf/train_macbert_cma.yaml \
+      --seed 777 \
       --data_type raw \
       --symbol_table ner_data/dict/ner_lang_char.txt \
       --ner_dict ner_data/dict/ner_label.txt \
       --train_data ner_data/train/data.list \
       --cv_data ner_data/dev/data.list \
-      --model_dir exp/cma_s0 \
+      --model_dir exp/debug \
       --ddp.init_method file:///opt/data/private/slzhou/wenet/examples/aishell/s0/exp/transformer/ddp_init \
       --ddp.world_size 1 \
       --ddp.rank 0 \
       --ddp.dist_backend gloo \
       --num_workers 1 \
       --cmvn exp/transformer/global_cmvn \
-      --pin_memory  > cma_s0.log 2>&1 &
+      --pin_memory

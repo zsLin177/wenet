@@ -13,17 +13,17 @@ export PATH=$PWD:${BUILD_DIR}:${BUILD_DIR}/kaldi:${OPENFST_PREFIX_DIR}/bin:$PATH
 export PYTHONIOENCODING=UTF-8
 export PYTHONPATH=../../../:$PYTHONPATH
 
-python wenet/bin/recognize_ner.py --gpu 1 \
+python wenet/bin/recognize_lstmcma.py --gpu 1 \
       --mode ctc_greedy_search \
-      --config exp/macbert_base/train.yaml \
+      --config exp/lstm_cma/train.yaml \
       --data_type raw \
       --test_data ner_data/test/data.list \
-      --checkpoint exp/macbert_base/best.pt \
+      --checkpoint exp/lstm_cma/best.pt \
       --beam_size 10 \
       --batch_size 64 \
       --penalty 0.0 \
-      --dict ner_data/dict/ner_lang_char.txt \
+      --dict ner_data/dict/lstm_ner_lang_char.txt \
       --ner_dict ner_data/dict/ner_label.txt \
       --ctc_weight 0.5 \
       --reverse_weight 0.0 \
-      --result_file exp/macbert_base/test_pred
+      --result_file exp/lstm_cma/test_pred

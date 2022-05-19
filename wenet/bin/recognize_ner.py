@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader
 
 from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_base_ner_model
+from wenet.transformer.sn_model import init_base_ner_model, init_base_simple_ner_model
 from wenet.utils.checkpoint import load_checkpoint
 from wenet.utils.file_utils import read_symbol_table, read_non_lang_symbols
 from wenet.utils.config import override_config
@@ -171,6 +171,7 @@ def main():
     configs['num_ner_labels'] = len(ner_table)
     # Init asr model from configs
     model = init_base_ner_model(configs)
+    # model = init_base_simple_ner_model(configs)
 
     # Load dict
     # char_dict = {v: k for k, v in symbol_table.items()}
@@ -191,7 +192,7 @@ def main():
 
     with torch.no_grad(), open(args.result_file, 'w') as fout:
         for batch_idx, batch in enumerate(test_data_loader):
-            keys, bert_tokenids, ner_seq = batch
+            keys, bert_tokenids, ner_seq, _ = batch
             # [batch_size, seq_len] plus cls
             bert_tokenids = bert_tokenids.to(device)
             ner_seq = ner_seq.to(device)
@@ -217,8 +218,8 @@ def main():
     pred_file = args.result_file
     gold_file = args.test_data
     nested_ner_F, indicators = call_as_metric(pred_file, gold_file)
-    logging.debug(f'nested: P: {indicators[0][0]:6.2%} R: {indicators[0][1]:6.2%} F: {indicators[0][2]:6.2%}')
-    logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
+    logging.debug(f'P: {indicators[0]:6.2%} R: {indicators[1]:6.2%} F: {indicators[2]:6.2%}')
+    # logging.debug(f'  flat: P: {indicators[1][0]:6.2%} R: {indicators[1][1]:6.2%} F: {indicators[1][2]:6.2%}')
 
 
 if __name__ == '__main__':

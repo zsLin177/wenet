@@ -15,7 +15,7 @@ encoder_conf:
 # bert related
 bert_conf:
     use_bert: true
-    bert_path: '/opt/data/private/slzhou/PLMs/bert-base-chinese'
+    bert_path: '/opt/data/private/slzhou/PLMs/chinese-macbert-base'
     max_fix_len: 10
     used_layers: 1
     out_dim: 512

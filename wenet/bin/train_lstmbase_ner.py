@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 
 from wenet.dataset.dataset import Dataset, BaseNerDataset
 from wenet.transformer.asr_model import init_asr_model
-from wenet.transformer.sn_model import init_lstmbase_model
+from wenet.transformer.sn_model import init_lstmbase_model, init_lstmbasesimple_model
 from wenet.utils.checkpoint import (load_checkpoint, save_checkpoint,
                                     load_trained_modules)
 from wenet.utils.executor import Executor
@@ -203,7 +203,9 @@ def main():
     configs['num_ner_labels'] = len(ner_label_table)
     configs['ner_dict'] = {v: k for k, v in ner_label_table.items()}
     # Init asr model from configs
-    model = init_lstmbase_model(configs)
+    # model = init_lstmbase_model(configs)
+    model = init_lstmbasesimple_model(configs)
+
     print(model)
     num_params = sum(p.numel() for p in model.parameters())
     print('the number of model params: {}'.format(num_params))

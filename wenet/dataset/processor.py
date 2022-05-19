@@ -332,12 +332,15 @@ def compute_fbank(data,
             # yield dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
             # bert_pad_idx=sample['bert_pad_idx'])
         
-        if 'ner_label' not in sample:
-            yield res
-        else:
+        if 'ner_label' in sample:
             res['ner_label'] = sample['ner_label']
             res['ner_pad_idx'] = sample['ner_pad_idx']
-            yield res
+
+        if 'char_idxs' in sample:
+            res['char_idxs'] = sample['char_idxs']
+            res['char_pad_idx'] = sample['char_pad_idx']
+        
+        yield res
 
 
 def compute_mfcc(data,
@@ -374,7 +377,24 @@ def compute_mfcc(data,
                          high_freq=high_freq,
                          low_freq=low_freq,
                          sample_frequency=sample_rate)
-        yield dict(key=sample['key'], label=sample['label'], feat=mat)
+        if 'bert_token' not in sample:
+            res = dict(key=sample['key'], label=sample['label'], feat=mat)
+            # yield dict(key=sample['key'], label=sample['label'], feat=mat)
+        else:
+            res = dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
+            bert_pad_idx=sample['bert_pad_idx'])
+            # yield dict(key=sample['key'], label=sample['label'], feat=mat, bert_token=sample['bert_token'],
+            # bert_pad_idx=sample['bert_pad_idx'])
+        
+        if 'ner_label' in sample:
+            res['ner_label'] = sample['ner_label']
+            res['ner_pad_idx'] = sample['ner_pad_idx']
+
+        if 'char_idxs' in sample:
+            res['char_idxs'] = sample['char_idxs']
+            res['char_pad_idx'] = sample['char_pad_idx']
+        
+        yield res
 
 
 def __tokenize_by_bpe_model(sp, txt):
@@ -497,6 +517,7 @@ def tokenize(data,
 
         label = []
         tokens = []
+        char_idxs = [symbol_table['<sos/eos>']]
         for part in parts:
             if part in non_lang_syms:
                 tokens.append(part)
@@ -514,11 +535,15 @@ def tokenize(data,
         for ch in tokens:
             if ch in symbol_table:
                 label.append(symbol_table[ch])
+                char_idxs.append(symbol_table[ch])
             elif '<unk>' in symbol_table:
                 label.append(symbol_table['<unk>'])
+                char_idxs.append(symbol_table['<unk>'])
 
         sample['tokens'] = tokens
         sample['label'] = label
+        sample['char_idxs'] = char_idxs
+        sample['char_pad_idx'] = symbol_table.get('<pad>', -1)
         if use_bert:
             sample['bert_token'] = bert_tokenize(bert_tokenizer, tokens, add_sep=False)
             sample['bert_pad_idx'] = bert_pad_idx
@@ -750,7 +775,7 @@ def batch(data, batch_type='static', batch_size=16, max_frames_in_batch=12000):
         logging.fatal('Unsupported batch type {}'.format(batch_type))
 
 
-def padding(data):
+def padding(data, if_lstm=False):
     """ Padding the data into training data
 
         Args:
@@ -791,8 +816,18 @@ def padding(data):
                                         padding_value=bert_pad_idx)
         padded_ner_seq = pad_sequence(sorted_ner, batch_first=True, padding_value=ner_pad_idx)
 
-        yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
-               label_lengths, padded_bert_tokenid, padded_ner_seq)
+        if not if_lstm:
+            yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
+                label_lengths, padded_bert_tokenid, padded_ner_seq)
+        else:
+            sorted_char = [torch.tensor(sample[i]['char_idxs'], dtype=torch.long) for i in order]
+            char_pad_idx = sample[0]['char_pad_idx']
+            padded_char_tokenid = pad_sequence(sorted_char,
+                                        batch_first=True,
+                                        padding_value=char_pad_idx)
+            yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
+                label_lengths, padded_bert_tokenid, padded_ner_seq, padded_char_tokenid)
+
 
 def padding_ner(data):
     """ Padding the data into training data

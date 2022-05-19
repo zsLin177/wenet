@@ -1,5 +1,6 @@
 import pdb
 
+
 def compute_matrix_align(align_ner_seq: dict):
     """
     计算预测的p,r,f
@@ -27,13 +28,6 @@ def compute_matrix_align(align_ner_seq: dict):
         flat_gold_sum_cnt += flat_gold_ne_str.__len__()
         flat_predict_correct_cnt += set(flat_predict_ne_str).intersection(set(flat_gold_ne_str)).__len__()
 
-    # print(f"{nested_predict_sum_cnt=}")
-    # print(f"{nested_predict_correct_cnt=}")
-    # print(f"{nested_gold_sum_cnt=}")
-    # print(f"{flat_predict_sum_cnt=}")
-    # print(f"{flat_predict_correct_cnt=}")
-    # print(f"{flat_gold_sum_cnt=}")
-
     p_nested = nested_predict_correct_cnt / nested_predict_sum_cnt
     r_nested = nested_predict_correct_cnt / nested_gold_sum_cnt
     f1_nested = (2 * p_nested * r_nested) / (p_nested + r_nested)
@@ -41,12 +35,6 @@ def compute_matrix_align(align_ner_seq: dict):
     p_flat = flat_predict_correct_cnt / flat_predict_sum_cnt
     r_flat = flat_predict_correct_cnt / flat_gold_sum_cnt
     f1_flat = (2 * p_flat * r_flat) / (p_flat + r_flat)
-    # print(f"{p_nested=}")
-    # print(f"{r_nested=}")
-    # print(f"{f1_nested=}")
-    # print(f"{p_flat=}")
-    # print(f"{r_flat=}")
-    # print(f"{f1_flat=}")
     return [[p_nested, r_nested, f1_nested], [p_flat, r_flat, f1_flat]]
 
 
@@ -56,7 +44,6 @@ def align_files(predict_file, gold_file):
         if _line.strip() == "":
             continue
         _key, _pre_ner_seq = _line.split(' ')
-        # print(_key, _pre_ner_seq.replace("[","['").replace("]","']").replace(",","','"))
         align_ner_seq[_key] = [eval(_pre_ner_seq.replace("[", "['").replace("]", "']").replace(",", "','")), ]
     for _line in gold_file:
         if _line.strip() == "":
@@ -87,13 +74,17 @@ def get_entity_by_BILOU_nested_only_valid(_ner_seq: list):
                     _tmp_tags_list = _ner_seq[_idz].split("|")
                     if _tmp_tags_list.__len__() <= _idy:
                         break
-                    if _tmp_tags_list[_idy][0] == 'I' and _tmp_tags_list[_idy][2:] != _tag[2:]:
-                        break
+                    if _tmp_tags_list[_idy][0] == 'I':
+                        if _tmp_tags_list[_idy][2:] != _tag[2:]:
+                            break
+                        else:
+                            continue
                     if _tmp_tags_list[_idy][0] == 'L':
                         if _tmp_tags_list[_idy][2:] != _tag[2:]:
                             break
                         _entity.append([_idx, _idz + 1, _tag[2:]])
                         break
+                    break
             if _tag[0] == 'U':
                 _entity.append([_idx, _idx + 1, _tag[2:]])
     _entity.sort(key=lambda _item: (_item[0], _item[0] - _item[1]))
@@ -125,12 +116,12 @@ def get_entity_by_BILOU_flat_only_valid(_ner_seq: list):
     _entity_str = [str(_item) for _item in _entity]
     return _entity_str
 
-def call_as_matric(pred_name, gold_name):
+def call_as_metric(pred_name, gold_name):
     predict_file = open(pred_name)
     gold_file = open(gold_name)
     align_file = align_files(predict_file, gold_file)
     indicators = compute_matrix_align(align_file)
-    return indicators[0][2]
+    return indicators[0][2], indicators
 
 if __name__ == '__main__':
     import argparse
